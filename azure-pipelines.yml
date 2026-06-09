@@ -4,39 +4,38 @@ trigger:
       - main
 
 variables:
-  imageName: 'my-java-app'
-  dockerfilePath: 'Dockerfile'
-  acrName: 'myacr'                        # ACR name without .azurecr.io
-  acrLoginServer: 'myacr.azurecr.io'
-  aksResourceGroup: 'my-aks-rg'
-  aksClusterName: 'my-aks-cluster'
-  namespace: 'default'
-  tag: '$(Build.BuildId)'
+  imageName: 'java-app'
+  dockerFilePath: 'Dockerfile'
+  acrName: 'devacr'
+  acrLoginServer: 'devacr.azurecr.in'
+  aksResourceGroup: 'devrsg'
+  aksClusterName: 'devaks'
+  namespace: 'dev'
+  tags: $(Build.BuildId)
 
 stages:
-
 - stage: Build
-  displayName: "Build and Push Docker Image"
+  displayName: "Build with Maven"
   jobs:
   - job: BuildPush
     pool:
       vmImage: 'ubuntu-latest'
     steps:
     - task: Maven@3
-      displayName: "Maven Build"
+      displayName: "Build with Maven"
       inputs:
         mavenPomFile: 'pom.xml'
-        goals: 'clean package -DskipTests'
+        goals: 'clean package'
 
     - task: Docker@2
-      displayName: "Build and Push Image to ACR"
+      displayName: "Build and Push Docker Image"
       inputs:
         command: buildAndPush
-        containerRegistry: 'ACR-Service-Connection'   # Registry Service Connection
-        repository: '$(acrLoginServer)/$(imageName)'
-        dockerfile: '$(dockerfilePath)'
+        containerRegistry: 'Acr-service-connection'
+        repository: $(imageName)
+        dockerfile: $(dockerFilePath)
         tags: |
-          $(tag)
+          $(tags)
 
 - stage: Deploy
   displayName: "Deploy to AKS"
@@ -47,12 +46,11 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - task: AzureCLI@2
-      displayName: "Deploy using kubectl"
+      displayName: "Deploy through CLI"
       inputs:
-        azureSubscription: 'Azure-Service-Connection'
+        azureSubscription: 'aks-service-connection'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          az aks get-credentials -g $(aksResourceGroup) -n $(aksClusterName) --overwrite-existing
-          kubectl set image deployment/my-java-deployment my-java-container=$(acrLoginServer)/$(imageName):$(tag) -n $(namespace) || \
-          kubectl apply -f k8s/deployment.yaml -n $(namespace)
+          az aks get-credentials --resource-group $(aksResourceGroup) --name $(aksClusterName)
+           kubectl apply -f deployment.yaml -n $(namespace)

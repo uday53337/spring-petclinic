@@ -5,52 +5,114 @@ trigger:
 
 variables:
   imageName: 'java-app'
-  dockerFilePath: 'Dockerfile'
-  acrName: 'devacr'
-  acrLoginServer: 'devacr.azurecr.in'
-  aksResourceGroup: 'devrsg'
-  aksClusterName: 'devaks'
-  namespace: 'dev'
-  tags: $(Build.BuildId)
+  acrLoginServer: 'devacr.azurecr.io'
+  imageTag: $(Build.BuildId)
 
 stages:
+
+# ==========================
+# BUILD STAGE
+# ==========================
 - stage: Build
-  displayName: "Build with Maven"
+  displayName: 'Build & Push Image'
+
   jobs:
-  - job: BuildPush
+  - job: Build
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: ubuntu-latest
+
     steps:
+
     - task: Maven@3
-      displayName: "Build with Maven"
+      displayName: 'Maven Build'
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'clean package'
 
     - task: Docker@2
-      displayName: "Build and Push Docker Image"
+      displayName: 'Build and Push'
       inputs:
         command: buildAndPush
-        containerRegistry: 'Acr-service-connection'
+        containerRegistry: 'Acr-Service-Connection'
         repository: $(imageName)
-        dockerfile: $(dockerFilePath)
+        dockerfile: 'Dockerfile'
         tags: |
-          $(tags)
+          $(imageTag)
 
-- stage: Deploy
-  displayName: "Deploy to AKS"
+# ==========================
+# DEV DEPLOYMENT
+# ==========================
+- stage: Dev
+  displayName: 'Deploy to DEV'
   dependsOn: Build
+
   jobs:
-  - job: DeployToAKS
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: AzureCLI@2
-      displayName: "Deploy through CLI"
-      inputs:
-        azureSubscription: 'aks-service-connection'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          az aks get-credentials --resource-group $(aksResourceGroup) --name $(aksClusterName)
-           kubectl apply -f deployment.yaml -n $(namespace)
+  - deployment: DeployDev
+    environment: DEV
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - task: KubernetesManifest@1
+            displayName: Deploy to DEV AKS
+            inputs:
+              action: deploy
+              kubernetesServiceConnection: 'AKS-DEV-CONNECTION'
+              namespace: dev
+              manifests: |
+                manifests/dev/deployment.yaml
+                manifests/dev/service.yaml
+
+# ==========================
+# QA DEPLOYMENT
+# ==========================
+- stage: QA
+  displayName: 'Deploy to QA'
+  dependsOn: Dev
+
+  jobs:
+  - deployment: DeployQA
+    environment: QA
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - task: KubernetesManifest@1
+            displayName: Deploy to QA AKS
+            inputs:
+              action: deploy
+              kubernetesServiceConnection: 'AKS-QA-CONNECTION'
+              namespace: qa
+              manifests: |
+                manifests/qa/deployment.yaml
+                manifests/qa/service.yaml
+
+# ==========================
+# PROD DEPLOYMENT
+# ==========================
+- stage: Prod
+  displayName: 'Deploy to PROD'
+  dependsOn: QA
+
+  jobs:
+  - deployment: DeployProd
+    environment: PROD
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - task: KubernetesManifest@1
+            displayName: Deploy to PROD AKS
+            inputs:
+              action: deploy
+              kubernetesServiceConnection: 'AKS-PROD-CONNECTION'
+              namespace: prod
+              manifests: |
+                manifests/prod/deployment.yaml
+                manifests/prod/service.yaml
